@@ -1,0 +1,148 @@
+<body>
+    <div id="container"></div>
+    <script src="three.js"></script>
+    <script id="vertexShader" type="x-shader/x-vertex">
+        void main() {
+            gl_Position = vec4( position, 1.0 );
+        }
+    </script>
+    <script id="fragmentShader" type="x-shader/x-fragment">
+#ifdef GL_ES
+precision mediump float;
+#endif
+
+#define PI 3.14159265359
+
+uniform vec2 u_resolution;
+uniform vec2 u_mouse;
+uniform float u_time;
+uniform vec2 fragCoord;
+
+uniform vec3      iResolution;           // viewport resolution (in pixels)
+uniform float     iGlobalTime;           // shader playback time (in seconds)
+uniform float     iChannelTime[4];       // channel playback time (in seconds)
+uniform vec3      iChannelResolution[4]; // channel resolution (in pixels)
+uniform vec4      iMouse;                // mouse pixel coords. xy: current (if MLB down), zw: click
+// uniform samplerXX iChannel0..3;          // input channel. XX = 2D/Cube
+uniform vec4      iDate;                 // (year, month, day, time in seconds)
+uniform float     iSampleRate;      
+uniform vec3 color;
+
+float plot(vec2 st, float pct){
+  return  smoothstep( pct-0.02, pct, st.y) - 
+          smoothstep( pct, pct+0.02, st.y);
+}
+
+int imod(int a, int b)
+{
+  return a - a / b * b;
+}
+int xor(int a, int b)
+{
+  int result = 0;
+  int x = 1;
+  for(int i = 0; i <= 8; ++i)
+    {
+        if (imod(a,2) != imod(b,2))
+            result += x;
+        a /= 2;
+        b /= 2;
+        x *= 2;
+  }
+  return result;
+}
+
+void main() {
+    vec2 st = gl_FragCoord.xy/u_resolution;
+
+    vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+    vec2 xy = uv * vec2(320.0,200.0);
+    float z;
+    vec2 dist;
+    for(int i = 0; i < 256; ++i)
+    {
+    z = float(i) / 255.0;
+    dist = (xy - vec2(160.0,100.0)) * z;    
+    z = mod(z + u_time/4.0, 1.0);
+    dist.x += sin(u_time*3.14)*15.0;   
+    int zz = int(z * 2.0);
+    if (zz == 0) dist.x -= 10.0;
+    else dist.x += 10.0;    
+    if ( (abs(dist.x) >= 25.0 && (imod(int(z*8.0),2)==0)) || abs(dist.y) >= 16.0)
+            break;
+    }
+  //   // Smooth interpolation between 0.1 and 0.9
+  //   float y = smoothstep(0.1,0.9,st.x);
+
+  //   vec3 color = vec3(y);
+    
+  //   float pct = plot(st,y);
+    // color = (1.0-pct)*color+pct*vec3(0.0,1.0,0.0);
+      int texel = xor(xor(int(dist.x), int(dist.y)), int(mod(z, 0.25)*255.0));
+    texel = imod(texel, 16);
+    float c = float(texel) / 16.0;
+  gl_FragColor = vec4(c,c,c,1.0);
+  // gl_FragColor = vec4(z,z,z,1.0);
+
+    // gl_FragColor = vec4(color,1.0);
+}
+    </script>
+    <script>
+
+        var container;
+        var camera, scene, renderer;
+        var uniforms;
+
+        init();
+        animate();
+
+        function init() {
+            container = document.getElementById( 'container' );
+
+            camera = new THREE.Camera();
+            camera.position.z = 1;
+
+            scene = new THREE.Scene();
+
+            var geometry = new THREE.PlaneBufferGeometry( 2, 2 );
+
+            uniforms = {
+                u_time: { type: "f", value: 1.0 },
+                u_resolution: { type: "v2", value: new THREE.Vector2() }
+            };
+
+            var material = new THREE.ShaderMaterial( {
+                uniforms: uniforms,
+                vertexShader: document.getElementById( 'vertexShader' ).textContent,
+                fragmentShader: document.getElementById( 'fragmentShader' ).textContent
+            } );
+
+            var mesh = new THREE.Mesh( geometry, material );
+            scene.add( mesh );
+
+            renderer = new THREE.WebGLRenderer();
+            renderer.setPixelRatio( window.devicePixelRatio );
+
+            container.appendChild( renderer.domElement );
+
+            onWindowResize();
+            window.addEventListener( 'resize', onWindowResize, false );
+        }
+
+        function onWindowResize( event ) {
+            renderer.setSize( window.innerWidth, window.innerHeight );
+            uniforms.u_resolution.value.x = renderer.domElement.width;
+            uniforms.u_resolution.value.y = renderer.domElement.height;
+        }
+
+        function animate() {
+            requestAnimationFrame( animate );
+            render();
+        }
+
+        function render() {
+            uniforms.u_time.value += 0.05;
+            renderer.render( scene, camera );
+        }
+    </script>
+</body>
