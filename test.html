@@ -82,9 +82,9 @@ void main() {
       int texel = xor(xor(int(dist.x), int(dist.y)), int(mod(z, 0.25)*255.0));
     texel = imod(texel, 16);
     float c = float(texel) / 16.0;
-  gl_FragColor = vec4(c,c,c,1.0);
+  // gl_FragColor = vec4(c,c,c,1.0);
   // gl_FragColor = vec4(z,z,z,1.0);
-  // gl_FragColor = vec4(c/z,z,z/c,1.0);
+  gl_FragColor = vec4(c/z,z,z/c,1.0);
   // gl_FragColor = vec4(dist.x*c/z,z,z/c,1.0);
   // gl_FragColor = vec4(c/z*u_time*.5,z/c,z/c,1.0);
   // gl_FragColor = vec4(c/z*u_time*.5,z/c*u_time*0.3,z/c,1.0);
@@ -93,8 +93,8 @@ void main() {
     // gl_FragColor = vec4(z/c*.6,c/z*u_time*0.3,c/z,0.5);
   // gl_FragColor = vec4(z/c*u_time/.10,c/z*0.3,c/z,0.5);
 // gl_FragColor = vec4(z/c*u_time/.10,c/c/z*0.3,c/z,0.5);
-gl_FragColor = vec4(z/c*u_time/.10/.4,c/c/z*0.3,c,0.5);
-gl_FragColor = vec4(c/z*u_time/.10/.4,c/c/z*0.4,c,0.9);
+// gl_FragColor = vec4(z/c*u_time/.10/.4,c/c/z*0.3,c,0.5);
+// gl_FragColor = vec4(c/z*u_time/.10/.4,c/c/z*0.4,c,0.9);
 // gl_FragColor = vec4(color,1.0);
 }
     </script>
