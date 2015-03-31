@@ -88,13 +88,13 @@ void main() {
   // gl_FragColor = vec4(dist.x*c/z,z,z/c,1.0);
   // gl_FragColor = vec4(c/z*u_time*.5,z/c,z/c,1.0);
   // gl_FragColor = vec4(c/z*u_time*.5,z/c*u_time*0.3,z/c,1.0);
-    // gl_FragColor = vec4(z/c*u_time*.5,z/c*u_time*0.3,c/z,0.5);
+    gl_FragColor = vec4(z/c*u_time*.5,z/c*u_time*0.3,c/z,0.5);
     // gl_FragColor = vec4(z/c*u_time*.5,c/z*u_time*0.3,c/z,0.5);
     // gl_FragColor = vec4(z/c*.6,c/z*u_time*0.3,c/z,0.5);
   // gl_FragColor = vec4(z/c*u_time/.10,c/z*0.3,c/z,0.5);
 // gl_FragColor = vec4(z/c*u_time/.10,c/c/z*0.3,c/z,0.5);
 // gl_FragColor = vec4(z/c*u_time/.10/.4,c/c/z*0.3,c,0.5);
-gl_FragColor = vec4(c/z*u_time/.10/.4,c/c/z*0.4,c,0.9);
+// gl_FragColor = vec4(c/z*u_time/.10/.4,c/c/z*0.4,c,0.9);
 // gl_FragColor = vec4(color,1.0);
 }
     </script>
@@ -115,7 +115,7 @@ gl_FragColor = vec4(c/z*u_time/.10/.4,c/c/z*0.4,c,0.9);
 
             scene = new THREE.Scene();
 
-            var geometry = new THREE.PlaneBufferGeometry( 2, 2 );
+            var geometry = new THREE.PlaneBufferGeometry( 2, 2, 1 );
 
             uniforms = {
                 u_time: { type: "f", value: 1.0 },
