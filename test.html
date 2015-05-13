@@ -68,7 +68,7 @@ void main() {
     float z;
     vec2 dist;
     // for(int i = 0; i < 100 ; ++i) // originally 256
-    for(int i = 0; i < 384  ; ++i)
+    for(int i = 0; i < 1000  ; ++i)
     {
     z = float(i) / 255.0;
     dist = (xy - vec2(160.0,100.0)) * z;    
@@ -90,8 +90,8 @@ void main() {
       int texel = xor(xor(int(dist.x), int(dist.y)), int(mod(z, 0.25)*255.0));
     texel = imod(texel, 16);
     float c = float(texel) / 24.0;
-  // gl_FragColor = vec4(c,c,c,1.0);
-  // gl_FragColor = vec4(z,z,z,1.0);
+  gl_FragColor = vec4(c,c,c,1.0);
+  gl_FragColor = vec4(z,z,z,1.0);
   // gl_FragColor = vec4(c/z,z,z/c,1.0);
   // gl_FragColor = vec4(dist.x*c/z,z,z/c,1.0);
   // gl_FragColor = vec4(c/z*u_time*.5,z/c,z/c,1.0);
@@ -105,8 +105,7 @@ void main() {
 // gl_FragColor = vec4(c/z*u_time/.10/.4,c/c/z*0.4,c,0.9);
 // gl_FragColor = vec4(c,z/c,z,1.0);
 // gl_FragColor = vec4(z,c/z,z,0.2);
-gl_FragColor = vec4(c/z,z,z/c,0.1);
-// gl_FragColor = vec4(color,1.0);
+// gl_FragColor = vec4(c/z,z,z/c,0.1);
 }
     </script>
     <script>
@@ -163,7 +162,7 @@ gl_FragColor = vec4(c/z,z,z/c,0.1);
         }
 
         function render() {
-            uniforms.u_time.value += 0.0333;
+            uniforms.u_time.value += 0.00333;
             // uniforms.u_time.value += 0.0666;
             // uniforms.u_time.value += 0.045;
             renderer.render( scene, camera );

@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <style>
+      body {
+        background-color: #ffffff;
+        margin: 0;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <!--
+  
+ /  |      /  |      /         /  |
+(___|     (   |     (         (___|  
+    )     |   )     |   )     |\     
+ __/      |__/      |__/      | \  
+                                       http://yolk.cc          
+  forked from threejs example:
+  https://github.com/mrdoob/three.js/blob/master/examples/webgl_animation_cloth.html
+                   
+                   
+  -->
+  <body>
+    
+    <script src="three.js"></script>
+    <!-- // <script src="http://cdnjs.cloudflare.com/ajax/libs/three.js/r71/Detector.js"></script> -->
+    <!-- <script src="http://brangerbriz.net/labs/threejs_playGnd/js/three.min.js"></script> -->
+    <!-- <script src="http://brangerbriz.net/labs/threejs_playGnd/js/Detector.js"></script> -->
+    <script type="x-shader/x-vertex" id="vertexShaderDepth">
+
+      varying vec2 vUV;
+
+      void main() {
+
+        vUV = 0.75 * uv;
+
+        vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
+
+        gl_Position = projectionMatrix * mvPosition;
+
+      }
+
+    </script>
+    <script id="simpleVertex" type="x-shader/x-vertex">
+            void main() {
+            gl_Position = vec4( position, 1.0 );
+        }
+    </script>
+    <script type="x-shader/x-fragment" id="fragmentShaderDepth">
+
+      uniform sampler2D texture;
+      varying vec2 vUV;
+
+      vec4 pack_depth( const in float depth ) {
+
+        const vec4 bit_shift = vec4( 256.0 * 256.0 * 256.0, 256.0 * 256.0, 256.0, 1.0 );
+        const vec4 bit_mask  = vec4( 0.0, 1.0 / 256.0, 1.0 / 256.0, 1.0 / 256.0 );
+        vec4 res = fract( depth * bit_shift );
+        res -= res.xxyz * bit_mask;
+        return res;
+
+      }
+
+      void main() {
+
+        vec4 pixel = texture2D( texture, vUV );
+
+        if ( pixel.a < 0.5 ) discard;
+
+        gl_FragData[ 0 ] = pack_depth( gl_FragCoord.z );
+
+      }
+    </script>
+
+    <script type="x-shader/x-vertex" id="vertexShaderDepth">
+
+      varying vec2 vUV;
+
+      void main() {
+
+        vUV = 0.75 * uv;
+
+        vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
+
+        gl_Position = projectionMatrix * mvPosition;
+
+      }
+
+    </script>
+<script id="newvertex" type="x-shader/x-fragment">
+uniform vec4 outputColor;
+uniform vec2 iResolution;
+void main(void)
+{ 
+   vec2 uv = gl_FragCoord.xy / iResolution.xy;
+    uint x = uint(uv.x * 320.0);
+    uint y = uint(uv.y * 200.0);
+    
+    uint z = 0u;
+    uint xdist, ydist;
+    for(int i = 0; i < 256; ++i)
+    {
+        xdist = ((x - 160u) * z + 4096u) >> 8;
+        ydist = ((y - 100u) * z + 4096u) >> 8;
+        switch(z / 64u)
+        {
+        case 0u: xdist -= 10u; break;
+        case 1u: xdist -= 40u; break;
+        case 2u: xdist -= 20u; break;
+        case 3u: xdist -= 30u; break;
+        }
+        if ((xdist >=32u && ((z & 32u) != 0u)) || (ydist >= 32u))
+            break;
+        ++z;
+    }
+
+    uint texel = (xdist & 255u) ^ (ydist & 255u) ^ z;
+    texel %= 16u;
+    float c = float(texel) / 16.0;
+    outputColor = vec4(vec3(c), 1.0);
+}
+
+</script>
+    <script>
+      /*
+       * Cloth Simulation using a relaxed constrains solver
+       */
+
+      // Suggested Readings
+
+      // Advanced Character Physics by Thomas Jakobsen Character
+      // http://freespace.virgin.net/hugo.elias/models/m_cloth.htm
+      // http://en.wikipedia.org/wiki/Cloth_modeling
+      // http://cg.alexandra.dk/tag/spring-mass-system/
+      // Real-time Cloth Animation http://www.darwin3d.com/gamedev/articles/col0599.pdf
+
+      var DAMPING = 0.03;
+      var DRAG = 1 - DAMPING;
+      var MASS = .1;
+      var restDistance = 25;
+
+
+      var xSegs = 10; //
+      var ySegs = 10; //
+
+      var clothFunction = plane(restDistance * xSegs, restDistance * ySegs);
+
+      var cloth = new Cloth(xSegs, ySegs);
+
+      var GRAVITY = 981 * 1.4; // 
+      var gravity = new THREE.Vector3( 0, -GRAVITY, 0 ).multiplyScalar(MASS);
+
+
+      var TIMESTEP = 18 / 1000;
+      var TIMESTEP_SQ = TIMESTEP * TIMESTEP;
+
+      var pins = [];
+
+
+      var wind = true;
+      var windStrength = 0.1;
+      var windForce = new THREE.Vector3(0,0,0);
+
+      var ballPosition = new THREE.Vector3(0, -45, 0);
+      var ballSize = 10; //40
+
+      var tmpForce = new THREE.Vector3();
+
+      var lastTime;
+
+
+      function plane(width, height) {
+
+        return function(u, v) {
+          var x = (u-0.5) * width;
+          var y = (v+0.5) * height;
+          var z = 0;
+
+          return new THREE.Vector3(x, y, z);
+        };
+      }
+
+      function Particle(x, y, z, mass) {
+        this.position = clothFunction(x, y); // position
+        this.previous = clothFunction(x, y); // previous
+        this.original = clothFunction(x, y); 
+        this.a = new THREE.Vector3(0, 0, 0); // acceleration
+        this.mass = mass;
+        this.invMass = 1 / mass;
+        this.tmp = new THREE.Vector3();
+        this.tmp2 = new THREE.Vector3();
+      }
+
+      // Force -> Acceleration
+      Particle.prototype.addForce = function(force) {
+        this.a.add(
+          this.tmp2.copy(force).multiplyScalar(this.invMass)
+        );
+      };
+
+
+      // Performs verlet integration
+      Particle.prototype.integrate = function(timesq) {
+        var newPos = this.tmp.subVectors(this.position, this.previous);
+        newPos.multiplyScalar(DRAG).add(this.position);
+        newPos.add(this.a.multiplyScalar(timesq));
+
+        this.tmp = this.previous;
+        this.previous = this.position;
+        this.position = newPos;
+
+        this.a.set(0, 0, 0);
+      }
+
+
+      var diff = new THREE.Vector3();
+
+      function satisifyConstrains(p1, p2, distance) {
+        diff.subVectors(p2.position, p1.position);
+        var currentDist = diff.length();
+        if (currentDist==0) return; // prevents division by 0
+        var correction = diff.multiplyScalar(1 - distance/currentDist);
+        var correctionHalf = correction.multiplyScalar(0.5);
+        p1.position.add(correctionHalf);
+        p2.position.sub(correctionHalf);
+      }
+
+
+      function Cloth(w, h) {
+        w = w || 10;
+        h = h || 10;
+        this.w = w;
+        this.h = h;
+
+        var particles = [];
+        var constrains = [];
+
+        var u, v;
+
+        // Create particles
+        for (v=0;v<=h;v++) {
+          for (u=0;u<=w;u++) {
+            particles.push(
+              new Particle(u/w, v/h, 0, MASS)
+            );
+          }
+        }
+
+        // Structural
+
+        for (v=0;v<h;v++) {
+          for (u=0;u<w;u++) {
+
+            constrains.push([
+              particles[index(u, v)],
+              particles[index(u, v+1)],
+              restDistance
+            ]);
+
+            constrains.push([
+              particles[index(u, v)],
+              particles[index(u+1, v)],
+              restDistance
+            ]);
+
+          }
+        }
+
+        for (u=w, v=0;v<h;v++) {
+          constrains.push([
+            particles[index(u, v)],
+            particles[index(u, v+1)],
+            restDistance
+
+          ]);
+        }
+
+        for (v=h, u=0;u<w;u++) {
+          constrains.push([
+            particles[index(u, v)],
+            particles[index(u+1, v)],
+            restDistance
+          ]);
+        }
+
+
+        // While many system uses shear and bend springs,
+        // the relax constrains model seem to be just fine
+        // using structural springs.
+        // Shear
+        // var diagonalDist = Math.sqrt(restDistance * restDistance * 2);
+
+
+        // for (v=0;v<h;v++) {
+        //  for (u=0;u<w;u++) {
+
+        //    constrains.push([
+        //      particles[index(u, v)],
+        //      particles[index(u+1, v+1)],
+        //      diagonalDist
+        //    ]);
+
+        //    constrains.push([
+        //      particles[index(u+1, v)],
+        //      particles[index(u, v+1)],
+        //      diagonalDist
+        //    ]);
+
+        //  }
+        // }
+
+
+        this.particles = particles;
+        this.constrains = constrains;
+
+        function index(u, v) {
+          return u + v * (w + 1);
+        }
+
+        this.index = index;
+
+      }
+
+      function simulate(time) {
+        if (!lastTime) {
+          lastTime = time;
+          return;
+        }
+        
+        var i, il, particles, particle, pt, constrains, constrain;
+
+        // Aerodynamics forces
+        if (wind) {
+          var face, faces = clothGeometry.faces, normal;
+
+          particles = cloth.particles;
+
+          for (i=0,il=faces.length;i<il;i++) {
+            face = faces[i];
+            normal = face.normal;
+
+            tmpForce.copy(normal).normalize().multiplyScalar(normal.dot(windForce));
+            particles[face.a].addForce(tmpForce);
+            particles[face.b].addForce(tmpForce);
+            particles[face.c].addForce(tmpForce);
+          }
+        }
+        
+        for (particles = cloth.particles, i=0, il = particles.length
+            ;i<il;i++) {
+          particle = particles[i];
+          particle.addForce(gravity);
+
+          particle.integrate(TIMESTEP_SQ);
+        }
+
+        // Start Constrains
+
+        constrains = cloth.constrains,
+        il = constrains.length;
+        for (i=0;i<il;i++) {
+          constrain = constrains[i];
+          satisifyConstrains(constrain[0], constrain[1], constrain[2]);
+        }
+
+        // Ball Constrains
+
+
+        ballPosition.z = -Math.sin(Date.now()/600) * 90 ; //+ 40;
+        ballPosition.x = Math.cos(Date.now()/400) * 70
+
+        
+        for (particles = cloth.particles, i=0, il = particles.length
+            ;i<il;i++) {
+          particle = particles[i];
+          pos = particle.position;
+          diff.subVectors(pos, ballPosition);
+          if (diff.length() < ballSize) {
+            // collided
+            diff.normalize().multiplyScalar(ballSize);
+            pos.copy(ballPosition).add(diff);
+          }
+        }
+
+        // Floor Constains
+        for (particles = cloth.particles, i=0, il = particles.length
+            ;i<il;i++) {
+          particle = particles[i];
+          pos = particle.position;
+          if (pos.y < -250) {
+            pos.y = -250;
+          }
+        }
+
+        // Pin Constrains
+        for (i=0, il=pins.length;i<il;i++) {
+          var xy = pins[i];
+          var p = particles[xy];
+          p.position.copy(p.original);
+          p.previous.copy(p.original);
+        }
+
+
+      }
+    </script>
+    <script id="mainImage" type="x-shader/x-fragment">
+#ifdef GL_ES
+precision mediump float;
+#endif
+
+#define PI 3.14159265359
+
+uniform vec2 u_resolution;
+uniform vec2 u_mouse;
+uniform float u_time;
+// uniform vec2 fragCoord;
+
+// uniform vec3      iResolution;           // viewport resolution (in pixels)
+// uniform float     iGlobalTime;           // shader playback time (in seconds)
+// uniform float     iChannelTime[4];       // channel playback time (in seconds)
+// uniform vec3      iChannelResolution[4]; // channel resolution (in pixels)
+// uniform vec4      iMouse;                // mouse pixel coords. xy: current (if MLB down), zw: click
+// // uniform samplerXX iChannel0..3;          // input channel. XX = 2D/Cube
+// uniform vec4      iDate;                 // (year, month, day, time in seconds)
+// uniform float     iSampleRate;      
+// uniform vec3 color;
+
+float plot(vec2 st, float pct){
+  return  smoothstep( pct-0.02, pct, st.y) - 
+          smoothstep( pct, pct+0.02, st.y);
+}
+
+int imod(int a, int b)
+{
+  return a - a / b * b;
+}
+int xor(int a, int b)
+{
+  int result = 0;
+  int x = 1;
+  for(int i = 0; i <= 8; ++i)
+    {
+        if (imod(a,2) != imod(b,2))
+            result += x;
+        a /= 2;
+        b /= 2;
+        x *= 2;
+  }
+  return result;
+}
+
+void main() {
+    vec2 st = gl_FragCoord.xy/u_resolution;
+
+    vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+    vec2 xy = uv * vec2(320.0,200.0);
+    float z;
+    vec2 dist;
+    for(int i = 0; i < 256; ++i)
+    {
+    z = float(i) / 255.0;
+    dist = (xy - vec2(160.0,100.0)) * z;    
+    z = mod(z + u_time/4.0, 1.0);
+    dist.x += sin(u_time*3.14)*15.0;   
+    int zz = int(z * 2.0);
+    if (zz == 0) dist.x -= 10.0;
+    else dist.x += 10.0;    
+    if ( (abs(dist.x) >= 25.0 && (imod(int(z*8.0),2)==0)) || abs(dist.y) >= 16.0)
+            break;
+    }
+  //   // Smooth interpolation between 0.1 and 0.9
+  //   float y = smoothstep(0.1,0.9,st.x);
+
+  //   vec3 color = vec3(y);
+    
+  //   float pct = plot(st,y);
+    // color = (1.0-pct)*color+pct*vec3(0.0,1.0,0.0);
+      int texel = xor(xor(int(dist.x), int(dist.y)), int(mod(z, 0.25)*255.0));
+    texel = imod(texel, 16);
+    float c = float(texel) / 16.0;
+  gl_FragColor = vec4(c,c,c,1.0);
+  // gl_FragColor = vec4(z,z,z,1.0);
+
+    // gl_FragColor = vec4(color,1.0);
+}
+    </script>
+    <script>
+
+      var pinsFormation = [];
+      var pins = [6];
+
+      pinsFormation.push( pins );
+
+      pins = [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ];
+      pinsFormation.push( pins );
+
+      pins = [ 0 ];
+      pinsFormation.push( pins );
+
+      pins = []; // cut the rope ;)
+      pinsFormation.push( pins );
+
+      pins = [ 0, cloth.w ]; // classic 2 pins
+      pinsFormation.push( pins );
+
+      pins = pinsFormation[ 1 ];
+
+      
+
+      var container, stats;
+      var camera, scene, renderer;
+
+      var clothGeometry;
+      var sphere;
+      var object, arrow;
+      var new_uniforms;
+
+      var rotate = true;
+      function setup() {
+        container = document.createElement( 'div' );
+        document.body.appendChild( container );
+
+        // scene
+
+        scene = new THREE.Scene();
+
+        scene.fog = new THREE.Fog( 0xcce0ff, 500, 10000 );
+
+        // camera
+
+        camera = new THREE.PerspectiveCamera( 15, window.innerWidth / window.innerHeight, 1, 10000 );
+        // camera = new THREE.PerspectiveCamera( 15, window.innerWidth / window.innerHeight, 1, 10000 );
+        camera.position.y = 200;
+        camera.position.z = 9000;
+        scene.add( camera );
+
+        // lights
+
+        var light, materials;
+
+        scene.add( new THREE.AmbientLight( 0xffffff ) );
+
+        light = new THREE.DirectionalLight( 0xdfebff, 1.75 );
+        light.position.set( 50, 200, 100 );
+        light.position.multiplyScalar( 1.3 );
+
+        light.castShadow = true;
+        //light.shadowCameraVisible = true;
+
+        light.shadowMapWidth = 2048 * 2;
+        light.shadowMapHeight = 2048 * 2;
+
+        var d = 400;
+
+        light.shadowCameraLeft = -d;
+        light.shadowCameraRight = d;
+        light.shadowCameraTop = d;
+        light.shadowCameraBottom = -d;
+
+        light.shadowCameraFar = 1000;
+        light.shadowDarkness = 0.5;
+
+        // scene.add( light );
+
+        light = new THREE.DirectionalLight( 0x3dff0c, 0.35 );
+        light.position.set( 0, -1, 0 );
+
+        // scene.add( light );
+
+        new_uniforms = {
+            u_time: { type: "f", value: 1.0 },
+            u_resolution: { type: "v2", value: new THREE.Vector2() }
+        };
+
+
+// uniform vec3      iResolution;           // viewport resolution (in pixels)
+// uniform float     iGlobalTime;           // shader playback time (in seconds)
+// uniform float     iChannelTime[4];       // channel playback time (in seconds)
+// uniform vec3      iChannelResolution[4]; // channel resolution (in pixels)
+// uniform vec4      iMouse;                // mouse pixel coords. xy: current (if MLB down), zw: click
+// uniform samplerXX iChannel0..3;          // input channel. XX = 2D/Cube
+// uniform vec4      iDate;                 // (year, month, day, time in seconds)
+// uniform float     iSampleRate;           // sound sample rate (i.e., 44100)
+
+var matg = new THREE.ShaderMaterial( {
+
+            uniforms: new_uniforms,
+            vertexShader: document.getElementById('simpleVertex').textContent,
+            fragmentShader: document.getElementById('mainImage').textContent,
+
+        } );
+
+        // cloth material
+
+        var clothTexture = THREE.ImageUtils.loadTexture( "./eIBV3iy.png" );
+        clothTexture.wrapS = clothTexture.wrapT = THREE.RepeatWrapping;
+        clothTexture.anisotropy = 16;
+
+        var clothMaterial = new THREE.MeshPhongMaterial( { alphaTest: 0.5, ambient: 0xffffff, color: 0xffffff, specular: 0x030303, emissive: 0x111111, shiness: 10, map: clothTexture, side: THREE.DoubleSide } );
+
+        // cloth geometry
+        clothGeometry = new THREE.ParametricGeometry( clothFunction, cloth.w, cloth.h, true );
+        clothGeometry.dynamic = true;
+        clothGeometry.computeFaceNormals();
+
+        var uniforms = { texture:  { type: "t", value: clothTexture } };
+        var vertexShader = document.getElementById( 'vertexShaderDepth' ).textContent;
+        var fragmentShader = document.getElementById( 'fragmentShaderDepth' ).textContent;
+
+
+        // cloth mesh
+
+        // object = new THREE.Mesh( clothGeometry, clothMaterial );
+        object = new THREE.Mesh( clothGeometry, clothMaterial );
+        object.position.set( 0, 0, 0 );
+        object.castShadow = true;
+        object.receiveShadow = true;
+        scene.add( object );
+
+        object.customDepthMaterial = new THREE.ShaderMaterial( { uniforms: uniforms, vertexShader: vertexShader, fragmentShader: fragmentShader } );
+        // object.customDepthMaterial = matg;
+
+        // sphere
+
+        var ballGeo = new THREE.SphereGeometry( ballSize, 20, 20 );
+        var ballMaterial = new THREE.MeshPhongMaterial( { color: 0xffffff } );
+
+        sphere = new THREE.Mesh( ballGeo, ballMaterial );
+        sphere.castShadow = true;
+        sphere.receiveShadow = true;
+        // scene.add( sphere );
+
+        // arrow
+
+        arrow = new THREE.ArrowHelper( new THREE.Vector3( 0, 1, 0 ), new THREE.Vector3( 0, 0, 0 ), 50, 0xff0000 );
+        arrow.position.set( -200, 0, -200 );
+        // scene.add( arrow );
+
+        // ground
+
+        var initColor = new THREE.Color( 0xffffff );
+        var initTexture = THREE.ImageUtils.generateDataTexture( 0, 0, initColor );
+
+        var groundMaterial = new THREE.MeshPhongMaterial( { color: 0xffffff, specular: 0xff0000, map: initTexture } );
+
+
+// uniforms = {
+//   iResolution: {type: 'v3', value: new THREE.Vector3() },
+//   iGlobalTime: {type: 'f', value: new Number() },
+//   iChannelTime: [
+//     {type: 'f', value: new Number() },
+//     {type: 'f', value: new Number() },
+//     {type: 'f', value: new Number() },
+//     {type: 'f', value: new Number() }
+//   ],
+//   iChannelResolution: [
+//     {type: 'v3', value: new THREE.Vector3() },
+//     {type: 'v3', value: new THREE.Vector3() },
+//     {type: 'v3', value: new THREE.Vector3() },
+//     {type: 'v3', value: new THREE.Vector3() }
+//   ],
+//   iMouse: {type: 'v4', value: new THREE.Vector4() },
+//   iDate: {type: 'v4', value: new THREE.Vector4() },
+//   iChannel0: {type: 't', value: new THREE.Texture() },
+//   iChannel1: {type: 't', value: new THREE.Texture() },
+//   iChannel2: {type: 't', value: new THREE.Texture() },
+//   iChannel3: {type: 't', value: new THREE.Texture() },
+//   iSampleRate: {type: 'f', value: new Number() }
+
+// }
+
+
+        // var groundTexture = THREE.ImageUtils.loadTexture( "http://placehold.it/250/e3e3e3/e3e3e3", undefined, function() { groundMaterial.map = groundTexture } );
+        // var groundTexture = THREE.ImageUtils.loadTexture( "http://placehold.it/250/e3e3e3/e3e3e3", undefined, function() { groundMaterial.map = matg } );
+        // var groundTexture = matg;
+        // groundMaterial.map = matg;
+        // groundTexture.wrapS = groundTexture.wrapT = THREE.RepeatWrapping;
+        // groundTexture.repeat.set( 1, 1 );
+        // groundTexture.anisotropy = 0;
+              var geometry = new THREE.PlaneBufferGeometry( 1, 1 );
+        // matg.wrapS = matg.wrapT = THREE.RepeatWrapping;
+        // var mesh = new THREE.Mesh( new THREE.PlaneGeometry( 20000, 20000 ), matg );
+        var mesh = new THREE.Mesh( geometry, matg );
+
+        mesh.position.z = -200;
+        mesh.rotation.x = - Math.PI / 2;
+        // mesh.receiveShadow = true;
+        scene.add( mesh );
+
+        // poles
+
+        // var poleGeo = new THREE.CubeGeometry( 5, 375, 5 );
+        // var poleMat = new THREE.MeshPhongMaterial( { color: 0xffffff, specular: 0x111111, shiness: 100 } );
+
+        // var mesh = new THREE.Mesh( poleGeo, poleMat );
+        // mesh.position.x = -125;
+        // mesh.position.y = -62;
+        // mesh.receiveShadow = true;
+        // mesh.castShadow = true;
+        // scene.add( mesh );
+
+        // var mesh = new THREE.Mesh( poleGeo, poleMat );
+        // mesh.position.x = 125;
+        // mesh.position.y = -62;
+        // mesh.receiveShadow = true;
+        // mesh.castShadow = true;
+        // scene.add( mesh );
+
+        // var mesh = new THREE.Mesh( new THREE.CubeGeometry( 255, 5, 5 ), poleMat );
+        // mesh.position.y = -250 + 750/2;
+        // mesh.position.x = 0;
+        // mesh.receiveShadow = true;
+        // mesh.castShadow = true;
+        // scene.add( mesh );
+
+        // var gg = new THREE.CubeGeometry( 10, 10, 10 );
+        // var mesh = new THREE.Mesh( gg, poleMat );
+        // mesh.position.y = -250;
+        // mesh.position.x = 125;
+        // mesh.receiveShadow = true;
+        // mesh.castShadow = true;
+        // scene.add( mesh );
+
+        // var mesh = new THREE.Mesh( gg, poleMat );
+        // mesh.position.y = -250;
+        // mesh.position.x = -125;
+        // mesh.receiveShadow = true;
+        // mesh.castShadow = true;
+        // scene.add( mesh );
+
+        
+
+
+        renderer = new THREE.WebGLRenderer( { antialias: true } );
+        renderer.setSize( window.innerWidth, window.innerHeight );
+        // renderer.setClearColor( scene.fog.color );
+            renderer.setPixelRatio( window.devicePixelRatio );
+
+        container.appendChild( renderer.domElement );
+
+        renderer.gammaInput = true;
+        renderer.gammaOutput = true;
+        renderer.physicallyBasedShading = true;
+
+        renderer.shadowMapEnabled = true;
+        renderer.setSize( window.innerWidth, window.innerHeight );
+        new_uniforms.u_resolution.value.x = renderer.domElement.width;
+        new_uniforms.u_resolution.value.y = renderer.domElement.height;
+
+      }
+
+      function draw() {
+
+        requestAnimationFrame( draw );
+        
+
+        var time = Date.now();
+
+        windStrength = Math.cos( time / 7000 ) * 20 + 40;
+        windForce.set( Math.sin( time / 2000 ), Math.cos( time / 30000 ), Math.sin( time / 10000 ) ).normalize().multiplyScalar( windStrength );
+
+        simulate(time);
+        render();
+        renderer.render( scene, camera );
+
+
+      }
+
+      function onWindowResize( event ) {
+          renderer.setSize( window.innerWidth, window.innerHeight );
+          uniforms.u_resolution.value.x = renderer.domElement.width;
+          uniforms.u_resolution.value.y = renderer.domElement.height;
+      }
+
+
+      function render() {
+
+        var timer = Date.now() * 0.0002;
+
+        var p = cloth.particles;
+
+        for ( var i = 0, il = p.length; i < il; i ++ ) {
+
+          clothGeometry.vertices[ i ].copy( p[ i ].position );
+
+        }
+
+        clothGeometry.computeFaceNormals();
+        clothGeometry.computeVertexNormals();
+
+        clothGeometry.normalsNeedUpdate = true;
+        clothGeometry.verticesNeedUpdate = true;
+
+        sphere.position.copy( ballPosition );
+        var rotate = true; 
+        if ( rotate ) {
+
+          camera.position.x = Math.cos( timer ) * 1500;
+          camera.position.z = Math.sin( timer ) * 1500;
+
+        }
+        camera.position.x = camera.position.z = 1000;
+        camera.position.y = 100;
+
+        camera.lookAt( scene.position );
+
+        renderer.render( scene, camera );
+        new_uniforms.u_time.value += 0.05;
+
+      }
+
+      setup();
+      draw();
+
+    </script>
+    
+  </body>
+</html>
